@@ -45,22 +45,29 @@ module pe #(
   fxp_mul #(QI,QF) u_mul (pe_input_in, weight_active, mult_out, );
   fxp_add #(QI,QF) u_add (mult_out,    pe_psum_in,    mac_out,  );
 
-  // TODO: weight promotion. Which register does the multiplier read?
+  // Weight promotion. The multiplier reads weight_active, which only takes
+  // weight_bg on a switch. Sequential: a combinational mux cannot remember
+  // the old weight once weight_bg has been overwritten.
 
-  always_comb begin
-    weight_active = '0;
+  always_ff @( posedge clk or posedge rst ) begin
+    if ( rst )
+      weight_active <= '0;
+    else if ( pe_enabled && pe_switch_in )
+      weight_active <= weight_bg;
   end
 
-  // TODO: weight staging. When does weight_bg capture pe_weight_in?
+  // Weight staging. weight_bg captures pe_weight_in whenever
+  // pe_accept_w_in is high, without touching weight_active.
 
   always_ff @( posedge clk or posedge rst ) begin
     if ( rst )
       weight_bg <= '0;
-    else
-      weight_bg <= weight_bg;
+    else if ( pe_enabled && pe_accept_w_in )
+      weight_bg <= pe_weight_in;
   end
 
-  // TODO: streaming datapath. Drive all five outputs.
+  // Streaming datapath. Register the MAC result south, forward the
+  // activation, valid, and switch east, and pass the weight south.
 
   always_ff @( posedge clk or posedge rst ) begin
     if ( rst ) begin
@@ -71,8 +78,15 @@ module pe #(
       pe_switch_out <= 1'b0;
     end
     else if ( !pe_enabled ) begin
+      pe_valid_out  <= 1'b0;
+      pe_switch_out <= 1'b0;
     end
     else begin
+      pe_psum_out   <= pe_valid_in    ? mac_out      : '0;
+      pe_input_out  <= pe_valid_in    ? pe_input_in  : '0;
+      pe_weight_out <= pe_accept_w_in ? pe_weight_in : '0;
+      pe_valid_out  <= pe_valid_in;
+      pe_switch_out <= pe_switch_in;
     end
   end
 
